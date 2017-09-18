@@ -72,6 +72,9 @@ class TemplateProcessor
      */
     public function __construct($documentTemplate)
     {
+        //start id for relationship between image and document.xml
+        $this->_countRels = 100;
+
         // Temporary document filename initialization
         $this->tempDocumentFilename = tempnam(Settings::getTempDir(), 'PhpWord');
         if (false === $this->tempDocumentFilename) {
@@ -147,7 +150,7 @@ class TemplateProcessor
 
     /**
      * Applies XSL style sheet to template's parts.
-     * 
+     *
      * Note: since the method doesn't make any guess on logic of the provided XSL style sheet,
      * make sure that output is correctly escaped. Otherwise you may get broken document.
      *
@@ -404,6 +407,14 @@ class TemplateProcessor
 
         $this->zipClass->addFromString($this->getMainPartName(), $this->tempDocumentMainPart);
 
+        if ($this->_rels != "") {
+            $this->zipClass->addFromString('word/_rels/document.xml.rels', $this->_rels);
+        }
+
+        if ($this->_types != "") {
+            $this->zipClass->addFromString('[Content_Types].xml', $this->_types);
+        }
+
         foreach ($this->tempDocumentFooters as $index => $xml) {
             $this->zipClass->addFromString($this->getFooterName($index), $xml);
         }
@@ -583,5 +594,112 @@ class TemplateProcessor
         }
 
         return substr($this->tempDocumentMainPart, $startPosition, ($endPosition - $startPosition));
+    }
+
+    /**
+     * validate and format image data
+     * @param  string/array $img
+     * @return array ['src' => 'image.jpg','swh'=>'250']
+     */
+    public static function checkImage($img)
+    {
+        //Set images as array
+        if (!is_array($img)) {
+            $img['src'] = $img;
+        }
+
+        $image = getimagesize($img['src']);
+        $imageType = $image[2];
+
+        if (!in_array($imageType, [IMAGETYPE_GIF, IMAGETYPE_JPEG, IMAGETYPE_PNG, IMAGETYPE_BMP])) {
+            $img['src'] = '';
+        }
+
+        return $img;
+    }
+
+    /**
+     * [setImg description]
+     * @param mixed $search
+     * @param mixed $img
+     */
+    public function setImg($search, $img, $imgExt = 'jpg')
+    {
+        $search = self::ensureMacroCompleted($search);
+        $img = self::checkImage($img);
+
+        $relationTmpl = '<Relationship Id="RID" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/IMG"/>';
+
+        $imgTmpl = '<w:pict><v:shape type="#_x0000_t75" style="width:WIDpx;height:HEIpx"><v:imagedata r:id="RID" o:title=""/></v:shape></w:pict>';
+
+        $toAdd = $toAddImg = $toAddType = '';
+        $aSearch = ['RID', 'IMG'];
+        $aSearchType = ['IMG', 'EXT'];
+        $countrels = $this->_countRels++;
+
+        $imgName = 'img' . $countrels . '.' . $imgExt;
+
+        $this->zipClass->deleteName('word/media/' . $imgName);
+        $this->zipClass->addFile($img['src'], 'word/media/' . $imgName);
+
+        $typeTmpl = '<Override PartName="/word/media/' . $imgName . '" ContentType="image/EXT"/>';
+
+        $rid = 'rId' . $countrels;
+        $countrels++;
+        list($w, $h) = getimagesize($img['src']);
+
+        if (isset($img['swh'])) //Image proportionally larger side
+        {
+            if ($w <= $h) {
+                $ht = (int) $img['swh'];
+                $ot = $w / $h;
+                $wh = (int) $img['swh'] * $ot;
+                $wh = round($wh);
+            }
+            if ($w >= $h) {
+                $wh = (int) $img['swh'];
+                $ot = $h / $w;
+                $ht = (int) $img['swh'] * $ot;
+                $ht = round($ht);
+            }
+            $w = $wh;
+            $h = $ht;
+        }
+
+        if (isset($img['size'])) {
+            $w = $img['size'][0];
+            $h = $img['size'][1];
+        }
+
+        $toAddImg .= str_replace(['RID', 'WID', 'HEI'], [$rid, $w, $h], $imgTmpl);
+
+        if (isset($img['dataImg'])) {
+            $toAddImg .= '<w:br/><w:t>' . self::limpiarString($img['dataImg']) . '</w:t><w:br/>';
+        }
+
+        $aReplace = [$imgName, $imgExt];
+        $toAddType .= str_replace($aSearchType, $aReplace, $typeTmpl);
+
+        $aReplace = [$rid, $imgName];
+        $toAdd .= str_replace($aSearch, $aReplace, $relationTmpl);
+
+        $this->tempDocumentMainPart = str_replace('<w:t>' . $search . '</w:t>', $toAddImg, $this->tempDocumentMainPart);
+
+        if ($this->_rels == "") {
+            $this->_rels = $this->zipClass->getFromName('word/_rels/document.xml.rels');
+            $this->_types = $this->zipClass->getFromName('[Content_Types].xml');
+        }
+
+        $this->_types = str_replace('</Types>', $toAddType, $this->_types) . '</Types>';
+        $this->_rels = str_replace('</Relationships>', $toAdd, $this->_rels) . '</Relationships>';
+    }
+
+    public static function limpiarString($str)
+    {
+        return str_replace(
+            ['&', '<', '>', "\n"],
+            ['&amp;', '&lt;', '&gt;', "\n" . '<w:br/>'],
+            $str
+        );
     }
 }
