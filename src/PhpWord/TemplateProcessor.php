@@ -674,7 +674,7 @@ class TemplateProcessor
         $toAddImg .= str_replace(['RID', 'WID', 'HEI'], [$rid, $w, $h], $imgTmpl);
 
         if (isset($img['dataImg'])) {
-            $toAddImg .= '<w:br/><w:t>' . self::limpiarString($img['dataImg']) . '</w:t><w:br/>';
+            $toAddImg .= '<w:br/><w:t>' . self::clearString($img['dataImg']) . '</w:t><w:br/>';
         }
 
         $aReplace = [$imgName, $imgExt];
@@ -694,7 +694,12 @@ class TemplateProcessor
         $this->_rels = str_replace('</Relationships>', $toAdd, $this->_rels) . '</Relationships>';
     }
 
-    public static function limpiarString($str)
+    /**
+     * replace characters that can cause problems
+     * @param  string $str
+     * @return string
+     */
+    public static function clearString($str)
     {
         return str_replace(
             ['&', '<', '>', "\n"],
